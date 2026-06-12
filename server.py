@@ -1,51 +1,47 @@
-from flask import Flask, request, render_template_string, jsonify
-import torch
+import base64
+
 import cv2
 import numpy as np
-import base64
-import json
+import torch
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
 # Load CUSTOM YOLOv5 model for crayfish
 model = torch.hub.load(
-    'C:/Users/Jaqueline/YoloRepos/yolov5',
-    'custom',
-    path='C:/Users/Jaqueline/YoloRepos/yolov5/runs/train/mixed_crayfishv12/weights/best.pt',
-    source='local'
+    "C:/Users/Jaqueline/YoloRepos/yolov5",
+    "custom",
+    path="C:/Users/Jaqueline/YoloRepos/yolov5/runs/train/mixed_crayfishv12/weights/best.pt",
+    source="local",
 )
 model.conf = 0.10
 
 crayfish_class_index = 0
 latest_image = None
-latest_detection_result = {
-    'status': 'no_detection',
-    'message': 'No detection available yet',
-    'size_category': None
-}
+latest_detection_result = {"status": "no_detection", "message": "No detection available yet", "size_category": None}
 
 # Load CUSTOM YOLOv5 model for eggs
 egg_model = torch.hub.load(
-    'C:/Users/Jaqueline/YoloRepos/yolov5',
-    'custom',
-    path='C:/Users/Jaqueline/YoloRepos/yolov5/runs/train/eggscrayfishv1/weights/best.pt',
-    source='local'
+    "C:/Users/Jaqueline/YoloRepos/yolov5",
+    "custom",
+    path="C:/Users/Jaqueline/YoloRepos/yolov5/runs/train/eggscrayfishv1/weights/best.pt",
+    source="local",
 )
 egg_model.conf = 0.10
 egg_class_index = 0  # adjust if your model has multiple classes
 
 latest_egg_detection_result = {
-    'status': 'no_detection',
-    'message': 'No egg detection available yet',
-    'eggs_detected': 0
+    "status": "no_detection",
+    "message": "No egg detection available yet",
+    "eggs_detected": 0,
 }
 
 # Latest pH status from ESP32
 latest_ph_status = {
-    'ph': None,
-    'raw': None,
-    'water_state': 'unknown',   # 'acidic', 'basic', 'normal'
-    'pump_state': 'off'        # 'on' or 'off'
+    "ph": None,
+    "raw": None,
+    "water_state": "unknown",  # 'acidic', 'basic', 'normal'
+    "pump_state": "off",  # 'on' or 'off'
 }
 
 # PIXEL SCALE
@@ -65,7 +61,7 @@ def classify_size(width_cm, height_cm):
     return "BIG", f">= {SMALL_CM_MAX} cm"
 
 
-@app.route('/upload', methods=['POST'])
+@app.route("/upload", methods=["POST"])
 def upload():
     global latest_image
     global latest_detection_result
@@ -111,34 +107,22 @@ def upload():
             print("Confidence:", round(float(conf), 3))
             print("----------------------")
 
-            detection_list.append({
-                'width_cm': round(width_cm, 2),
-                'height_cm': round(height_cm, 2),
-                'size_category': size_category,
-                'size_range': size_range,
-                'confidence': round(float(conf), 3)
-            })
+            detection_list.append(
+                {
+                    "width_cm": round(width_cm, 2),
+                    "height_cm": round(height_cm, 2),
+                    "size_category": size_category,
+                    "size_range": size_range,
+                    "confidence": round(float(conf), 3),
+                }
+            )
 
             # Draw bounding box
-            cv2.rectangle(
-                img,
-                (int(x1), int(y1)),
-                (int(x2), int(y2)),
-                (0, 255, 0),
-                2
-            )
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
 
-            label = f"{size_category} ({size_range}) {width_cm:.1f}-{height_cm:.1f}cm {conf*100:.0f}%"
+            label = f"{size_category} ({size_range}) {width_cm:.1f}-{height_cm:.1f}cm {conf * 100:.0f}%"
 
-            cv2.putText(
-                img,
-                label,
-                (int(x1), int(y1) - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2
-            )
+            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     # --- EGG DETECTION ---
     egg_results = egg_model(img_rgb)
@@ -150,27 +134,13 @@ def upload():
         if int(cls) == egg_class_index:
             eggs_found += 1
             # Draw bounding box for eggs (red)
-            cv2.rectangle(
-                img,
-                (int(x1), int(y1)),
-                (int(x2), int(y2)),
-                (0, 0, 255),
-                2
-            )
-            label = f"EGG {conf*100:.0f}%"
-            cv2.putText(
-                img,
-                label,
-                (int(x1), int(y1) - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2
-            )
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+            label = f"EGG {conf * 100:.0f}%"
+            cv2.putText(img, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
     latest_egg_detection_result = {
-        'status': 'detected' if eggs_found > 0 else 'no_detection',
-        'eggs_detected': eggs_found
+        "status": "detected" if eggs_found > 0 else "no_detection",
+        "eggs_detected": eggs_found,
     }
 
     latest_image = img
@@ -178,31 +148,28 @@ def upload():
     # Update latest detection result for Arduino to retrieve
     if crayfish_found and detection_list:
         latest_detection_result = {
-            'status': 'detected',
-            'detections_found': len(detections),
-            'crayfish_found': len(detection_list),
-            'details': detection_list,
-            'size_category': detection_list[0]['size_category']
+            "status": "detected",
+            "detections_found": len(detections),
+            "crayfish_found": len(detection_list),
+            "details": detection_list,
+            "size_category": detection_list[0]["size_category"],
         }
         return "detected", 200
     else:
         print("No crayfish detected")
-        latest_detection_result = {
-            'status': 'no_detection',
-            'message': 'No crayfish detected in latest frame'
-        }
+        latest_detection_result = {"status": "no_detection", "message": "No crayfish detected in latest frame"}
         return "not_detected", 200
 
 
-@app.route('/')
+@app.route("/")
 def index():
     global latest_image
 
     if latest_image is None:
         return "Waiting for image..."
 
-    _, buffer = cv2.imencode('.jpg', latest_image)
-    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    _, buffer = cv2.imencode(".jpg", latest_image)
+    img_base64 = base64.b64encode(buffer).decode("utf-8")
 
     return f"""
     <h2>YOLOv5 Crayfish Detection</h2>
@@ -211,16 +178,17 @@ def index():
     """
 
 
-@app.route('/test', methods=['GET', 'POST'])
+@app.route("/test", methods=["GET", "POST"])
 def test_upload():
-    """Real-time camera feed from ESP32-S3"""
+    """Real-time camera feed from ESP32-S3."""
     global latest_image
     global latest_detection_result
     global latest_egg_detection_result
     global latest_ph_status
 
     if latest_image is None:
-        return '''
+        return (
+            """
         <html>
         <head>
             <title>ESP32 Crayfish Detection - Real-time Camera</title>
@@ -248,18 +216,20 @@ def test_upload():
             </div>
         </body>
         </html>
-        ''', 200
+        """,
+            200,
+        )
 
     # Display latest image with detection results
-    _, buffer = cv2.imencode('.jpg', latest_image)
-    img_base64 = base64.b64encode(buffer).decode('utf-8')
+    _, buffer = cv2.imencode(".jpg", latest_image)
+    img_base64 = base64.b64encode(buffer).decode("utf-8")
 
     # Build detection info if available
     detection_info = ""
     if latest_detection_result:
-        if latest_detection_result.get('status') == 'detected':
-            crayfish_count = latest_detection_result.get('crayfish_found', 0)
-            size_cat = latest_detection_result.get('size_category', 'Unknown')
+        if latest_detection_result.get("status") == "detected":
+            crayfish_count = latest_detection_result.get("crayfish_found", 0)
+            size_cat = latest_detection_result.get("size_category", "Unknown")
             detection_info = f"""
             <div class="status detected">
                 ✓ <b>Crayfish Detected!</b><br>
@@ -278,8 +248,8 @@ def test_upload():
     # Build egg info if available
     egg_info = ""
     if latest_egg_detection_result:
-        if latest_egg_detection_result.get('status') == 'detected':
-            egg_count = latest_egg_detection_result.get('eggs_detected', 0)
+        if latest_egg_detection_result.get("status") == "detected":
+            egg_count = latest_egg_detection_result.get("eggs_detected", 0)
             egg_info = f"""
             <div class="status detected" style="background-color:#f8d7da; color:#721c24; border-left-color:#dc3545;">
                 🥚 Eggs Detected! Count: {egg_count}
@@ -295,20 +265,20 @@ def test_upload():
     # Build pH info
     ph_info = ""
     if latest_ph_status:
-        ph_val = latest_ph_status.get('ph')
-        water_state = (latest_ph_status.get('water_state') or 'unknown').lower()
-        pump_state = (latest_ph_status.get('pump_state') or 'off').lower()
+        ph_val = latest_ph_status.get("ph")
+        water_state = (latest_ph_status.get("water_state") or "unknown").lower()
+        pump_state = (latest_ph_status.get("pump_state") or "off").lower()
 
-        if water_state == 'acidic':
-            state_text = 'Too acidic'
-        elif water_state == 'basic':
-            state_text = 'Too basic'
-        elif water_state == 'normal':
-            state_text = 'Normal range'
+        if water_state == "acidic":
+            state_text = "Too acidic"
+        elif water_state == "basic":
+            state_text = "Too basic"
+        elif water_state == "normal":
+            state_text = "Normal range"
         else:
-            state_text = 'Unknown'
+            state_text = "Unknown"
 
-        pump_text = 'ON' if pump_state == 'on' else 'OFF'
+        pump_text = "ON" if pump_state == "on" else "OFF"
 
         if ph_val is not None:
             ph_info = f"""
@@ -350,7 +320,7 @@ def test_upload():
             <div class="info">
                 📡 <b>Camera Status:</b> Streaming<br>
                 🔄 Page auto-refreshes every 1 second<br>
-                {f'🐉 <b>Latest Detection:</b> {latest_detection_result.get("size_category", "N/A")}' if latest_detection_result and latest_detection_result.get('status') == 'detected' else '🐉 <b>Latest Detection:</b> Waiting...'}
+                {f"🐉 <b>Latest Detection:</b> {latest_detection_result.get("size_category", "N/A")}" if latest_detection_result and latest_detection_result.get("status") == "detected" else "🐉 <b>Latest Detection:</b> Waiting..."}
             </div>
             <div class="api-info">
                 <b>Arduino Integration:</b><br>
@@ -367,43 +337,39 @@ def test_upload():
     """
 
 
-@app.route('/api/detect', methods=['GET'])
+@app.route("/api/detect", methods=["GET"])
 def api_detect():
-    """API endpoint for Arduino to get latest detection results"""
+    """API endpoint for Arduino to get latest detection results."""
     global latest_detection_result
     return jsonify(latest_detection_result), 200
 
 
-@app.route('/api/detect_eggs', methods=['GET'])
+@app.route("/api/detect_eggs", methods=["GET"])
 def api_detect_eggs():
-    """API endpoint for Arduino to get latest egg detection results"""
+    """API endpoint for Arduino to get latest egg detection results."""
     global latest_egg_detection_result
     return jsonify(latest_egg_detection_result), 200
 
 
-@app.route('/api/ph', methods=['POST'])
+@app.route("/api/ph", methods=["POST"])
 def api_ph_update():
-    """ESP32 posts latest pH reading and pump state here"""
+    """ESP32 posts latest pH reading and pump state here."""
     global latest_ph_status
 
     try:
         data = request.get_json(force=True)
     except Exception:
-        return jsonify({'status': 'error', 'message': 'invalid json'}), 400
+        return jsonify({"status": "error", "message": "invalid json"}), 400
 
-    ph = data.get('ph')
-    raw = data.get('raw')
-    water_state = data.get('water_state', 'unknown')
-    pump_state = data.get('pump_state', 'off')
+    ph = data.get("ph")
+    raw = data.get("raw")
+    water_state = data.get("water_state", "unknown")
+    pump_state = data.get("pump_state", "off")
 
-    latest_ph_status = {
-        'ph': ph,
-        'raw': raw,
-        'water_state': water_state,
-        'pump_state': pump_state
-    }
+    latest_ph_status = {"ph": ph, "raw": raw, "water_state": water_state, "pump_state": pump_state}
 
-    return jsonify({'status': 'ok'}), 200
+    return jsonify({"status": "ok"}), 200
 
-if __name__ == '__main__':
-    app.run(host='192.168.100.202', port=5000)
+
+if __name__ == "__main__":
+    app.run(host="192.168.100.202", port=5000)
